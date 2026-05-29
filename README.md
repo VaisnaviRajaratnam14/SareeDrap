@@ -305,6 +305,151 @@ REACT_APP_API_URL=http://localhost:5000/api
 
 ---
 
+## How to Train in Google Colab
+
+> **Start here** — Colab gives you a free T4 GPU and is simpler than Kaggle for first runs.  
+> This safe first-run uses **10,000 images per category × 5 epochs** (~40–75 min).  
+> After confirming it works, upgrade to the full 135k Kaggle notebook.
+
+### Quick start (4 steps)
+
+**1 — Open the notebook in Colab**
+
+Go to https://colab.research.google.com → **File → Upload notebook** → select:
+```
+notebooks/colab_saree_training_10k.ipynb
+```
+Or from GitHub: **File → Open notebook → GitHub** → paste `https://github.com/VaisnaviRajaratnam14/SareeDrap`
+
+**2 — Enable GPU**
+```
+Runtime → Change runtime type → Hardware accelerator → GPU (T4)
+```
+
+**3 — Add Kaggle API secrets**
+```
+Colab left sidebar → 🔑 Secrets → + Add new secret
+  KAGGLE_USERNAME = your-kaggle-username
+  KAGGLE_KEY      = your-api-key
+```
+Get key: https://www.kaggle.com/settings → API → **Create New Token**
+
+**4 — Accept dataset licences on Kaggle (one-time)**
+
+| Dataset | URL |
+|---|---|
+| Saree Try-On | https://www.kaggle.com/datasets/chirag2466/saree-tryon-dataset |
+| VITON-HD | https://www.kaggle.com/datasets/marquis03/high-resolution-viton-zalando-dataset |
+| Human Women (full-body with face) | https://www.kaggle.com/datasets/snmahsa/human-images-dataset-men-and-women |
+| Indian Saree Patterns (fabric) | https://www.kaggle.com/datasets/div456/indian-saree-patterns |
+
+**5 — Run all cells**
+```
+Runtime → Run all   (Ctrl+F9)
+```
+
+Expected total time: **40–75 minutes** on T4 GPU.
+
+---
+
+### Training configuration (safe first run)
+
+| Parameter | Value | Why |
+|---|---|---|
+| Images per category | **10,000** | Fast, safe — verifies full pipeline |
+| Epochs | **5** | Enough to confirm loss is decreasing |
+| Batch size | 16 | T4 VRAM comfortable |
+| Image size | 256×192 | Matches local app |
+| Total training steps | ~3,000–6,000 | ~15–30 min |
+
+---
+
+### Model export (Cell 9 saves these automatically)
+
+| File | Path in zip | Deploy to |
+|---|---|---|
+| `saree_tryon_model.pth` | root | `backend/dataset/trained_models/` |
+| `model_config.json` | root | `backend/dataset/trained_models/` |
+| `training_report.json` | root | `backend/dataset/trained_models/` (optional) |
+| `checkpoints/checkpoint_epochXX.pth` | checkpoints/ | keep as backup |
+
+All 4 files are zipped into `saree_weights.zip` by Cell 11.
+
+---
+
+### Download weights (after Cell 11)
+
+**Option A — Files panel**
+```
+Colab left sidebar → 📁 Files → /content/saree_weights.zip → right-click → Download
+```
+
+**Option B — Code (add a new cell)**
+```python
+from google.colab import files
+files.download('/content/saree_weights.zip')
+```
+
+---
+
+### Local deployment instructions
+
+**1 — Extract** `saree_weights.zip`
+
+**2 — Copy files to project**
+
+Windows:
+```bat
+copy saree_tryon_model.pth  sareedrap\backend\dataset\trained_models\
+copy model_config.json      sareedrap\backend\dataset\trained_models\
+```
+
+Mac/Linux:
+```bash
+cp saree_tryon_model.pth  sareedrap/backend/dataset/trained_models/
+cp model_config.json      sareedrap/backend/dataset/trained_models/
+```
+
+**3 — Restart Flask backend**
+```bash
+cd sareedrap/backend
+venv\Scripts\activate      # Windows
+# source venv/bin/activate  # Mac/Linux
+python app.py
+```
+
+Startup log should show:
+```
+ML engine     : available (weights found)
+```
+
+**4 — Click Test Inference in the UI**
+```
+Open http://localhost:3000
+→ Customize page → Step 4 → click "Test Inference"
+```
+Expected response: `engine: ml_model` (not `geometric_fallback`).
+
+**5 — Generate a draping**
+```
+Upload page → upload body + saree + blouse images
+Customize page → pick style → Generate Draping
+```
+Output now uses the trained `SareeTryOnModel` (113M params).
+
+---
+
+### Notebooks reference
+
+| Notebook | Where to run | Images | Epochs | Use for |
+|---|---|---|---|---|
+| `colab_saree_training_10k.ipynb` | **Google Colab** | 10k/cat | 5 | Safe first run — verify pipeline |
+| `full_saree_training_150k.ipynb` | **Kaggle** | 50k/cat | 20 | Production model (full dataset) |
+
+Setup guide: `notebooks/colab_setup_steps.md`
+
+---
+
 ## ML Training — Two Modes
 
 The system supports two training modes selectable from the UI (**Customize → Step 4 → Training Mode**).
