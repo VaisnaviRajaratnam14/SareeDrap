@@ -1,0 +1,19 @@
+{
+  "fetched": true,
+  "cleaned": true,
+  "total_images": 396,
+  "cleaned_images": 396,
+  "per_category": {
+    "body_images": 96,
+    "saree_images": 150,
+    "blouse_materials": 150
+  },
+  "cleaned_per_category": {
+    "body_images": 96,
+    "saree_images": 150,
+    "blouse_materials": 150
+  },
+  "annotated": true,
+  "annotated_count": 96,
+  "masks_count": 300
+}

@@ -1,0 +1,9 @@
+{
+  "body_images_processed": 96,
+  "body_images_failed": 0,
+  "masks_generated": 300,
+  "annotations_dir": "D:\\sareedrap\\backend\\dataset\\annotations",
+  "masks_dir": "D:\\sareedrap\\backend\\dataset\\cleaned\\masks",
+  "error_list": [],
+  "annotated_at": "2026-05-28T15:59:17.440931Z"
+}

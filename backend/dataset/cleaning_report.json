@@ -1,0 +1,29 @@
+{
+  "total_cleaned": 396,
+  "total_removed": 0,
+  "purged_placeholders": 0,
+  "categories": [
+    {
+      "category": "body_images",
+      "raw_count": 96,
+      "cleaned_count": 96,
+      "rejected_count": 0,
+      "cleaned_folder": "D:\\sareedrap\\backend\\dataset\\cleaned\\body_images"
+    },
+    {
+      "category": "saree_images",
+      "raw_count": 150,
+      "cleaned_count": 150,
+      "rejected_count": 0,
+      "cleaned_folder": "D:\\sareedrap\\backend\\dataset\\cleaned\\saree_images"
+    },
+    {
+      "category": "blouse_materials",
+      "raw_count": 150,
+      "cleaned_count": 150,
+      "rejected_count": 0,
+      "cleaned_folder": "D:\\sareedrap\\backend\\dataset\\cleaned\\blouse_materials"
+    }
+  ],
+  "cleaned_at": "2026-05-28T15:58:24.530000Z"
+}

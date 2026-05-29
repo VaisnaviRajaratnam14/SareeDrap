@@ -1,0 +1,14 @@
+{
+  "status": "completed",
+  "model_exists": true,
+  "progress": 100,
+  "epoch": 10,
+  "total_epochs": 10,
+  "loss": 0.002006,
+  "eta_seconds": 0,
+  "message": "Training complete \u2014 10 epochs, best_loss=0.002006, device=cpu, weights=443528 KB",
+  "started_at": "2026-05-28T16:36:54.713640+00:00",
+  "finished_at": "2026-05-28T17:33:56.237839+00:00",
+  "best_loss": 0.002006,
+  "weights_kb": 443528.1
+}

@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+*.egg-info/
+dist/
+build/
+
+# Environment files — keep out of git
+backend/.env
+frontend/.env
+
+# Uploads & outputs (user data — not for git)
+backend/uploads/
+uploads/
+backend/outputs/
+outputs/
+
+# Temporary Kaggle download cache
+backend/dataset/_tmp_kaggle_*/
+
+# Large binary model task files
+backend/models/*.task
+backend/pose_landmarker.task
+*.task
+
+# Node
+node_modules/
+frontend/build/
+
+# IDE
+.vscode/
+*.idea/
+*.swp
+*.DS_Store
+
+# Models (large files)
+models/*.pt
+models/*.onnx
+models/*.pkl
+
+# Trained weights & checkpoints (large — download separately from Kaggle)
+backend/dataset/trained_models/*.pth
+backend/dataset/trained_models/checkpoints/
+*.pth
+
+# Dataset images (large — populated at runtime)
+backend/dataset/raw/
+backend/dataset/cleaned/
+backend/dataset/annotations/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# Misc
+*.zip
+*.log

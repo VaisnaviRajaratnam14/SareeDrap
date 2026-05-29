@@ -1,0 +1,11 @@
+{
+  "img_h": 256,
+  "img_w": 192,
+  "grid_size": 5,
+  "base_ch": 64,
+  "epochs": 10,
+  "device": "cpu",
+  "stub": false,
+  "trained_at": "2026-05-28T16:36:54.713640+00:00",
+  "total_imgs": 396
+}

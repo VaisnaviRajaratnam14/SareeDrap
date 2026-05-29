@@ -1,0 +1,52 @@
+/* Google Fonts loaded via <link> in index.html */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-body bg-gray-950 text-white antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-gradient-to-r from-saree-600 to-saree-500 hover:from-saree-700 hover:to-saree-600
+           text-white font-semibold px-6 py-3 rounded-xl transition-all duration-300
+           shadow-lg hover:shadow-saree-500/30 hover:scale-105 active:scale-95;
+  }
+  .btn-secondary {
+    @apply border border-saree-500/40 text-saree-300 hover:bg-saree-500/10
+           font-semibold px-6 py-3 rounded-xl transition-all duration-300;
+  }
+  .card {
+    @apply bg-gray-900/60 backdrop-blur-sm border border-white/10 rounded-2xl
+           shadow-xl;
+  }
+  .input-field {
+    @apply w-full bg-gray-800/60 border border-white/10 rounded-xl px-4 py-3
+           text-white placeholder-gray-400 focus:outline-none focus:ring-2
+           focus:ring-saree-500/50 focus:border-saree-500/50 transition-all;
+  }
+  .upload-zone {
+    @apply border-2 border-dashed border-saree-500/40 rounded-2xl p-8
+           flex flex-col items-center justify-center text-center
+           hover:border-saree-400/60 hover:bg-saree-500/5 transition-all duration-300
+           cursor-pointer;
+  }
+  .step-badge {
+    @apply w-9 h-9 rounded-full bg-gradient-to-br from-saree-600 to-saree-400
+           flex items-center justify-center text-white text-sm font-bold
+           shadow-lg shadow-saree-500/30 flex-shrink-0;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar       { width: 6px; }
+::-webkit-scrollbar-track { background: #0a0a0f; }
+::-webkit-scrollbar-thumb { background: #5e007d; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #a800e6; }
