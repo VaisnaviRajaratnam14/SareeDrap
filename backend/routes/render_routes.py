@@ -208,10 +208,32 @@ def test_inference():
 @token_required
 def download(output_id):
     """Download the final rendered output image."""
-    db  = current_app.mongo.db
-    doc = db.generated_outputs.find_one(
-        {"_id": ObjectId(output_id), "user_id": request.user_id, "is_deleted": False}
-    )
+    # ── No-DB / demo mode: serve from outputs folder by filename ───────────────
+    if not current_app.db_available:
+        output_folder = current_app.config["OUTPUT_FOLDER"]
+        # output_id may be the bare filename (with or without extension)
+        fname = output_id if output_id.endswith(".jpg") else f"{output_id}.jpg"
+        output_path = os.path.join(os.path.abspath(output_folder), fname)
+        if not os.path.exists(output_path):
+            # Try treating output_id as the full filename stored in context
+            matches = [
+                f for f in os.listdir(os.path.abspath(output_folder))
+                if f.startswith(output_id) or output_id in f
+            ]
+            if not matches:
+                return error_response("Output file not found", 404)
+            output_path = os.path.join(os.path.abspath(output_folder), matches[0])
+        return send_file(output_path, as_attachment=True,
+                         download_name=f"saree-draping-{os.path.basename(output_path)}")
+
+    # ── DB mode ────────────────────────────────────────────────────────────────
+    try:
+        db  = current_app.mongo.db
+        doc = db.generated_outputs.find_one(
+            {"_id": ObjectId(output_id), "user_id": request.user_id, "is_deleted": False}
+        )
+    except Exception:
+        return error_response("Database unavailable", 503)
     if not doc:
         return error_response("Output not found", 404)
 
@@ -227,19 +249,33 @@ def download(output_id):
 def cleanup(output_id):
     """
     Privacy cleanup: soft-delete record and remove all associated temp files.
+    In no-DB mode, just deletes the output file from the outputs folder.
     """
-    db  = current_app.mongo.db
-    doc = db.generated_outputs.find_one(
-        {"_id": ObjectId(output_id), "user_id": request.user_id}
-    )
+    if not current_app.db_available:
+        output_folder = os.path.abspath(current_app.config["OUTPUT_FOLDER"])
+        fname = output_id if output_id.endswith(".jpg") else f"{output_id}.jpg"
+        output_path = os.path.join(output_folder, fname)
+        if not os.path.exists(output_path):
+            matches = [f for f in os.listdir(output_folder)
+                       if f.startswith(output_id) or output_id in f]
+            for m in matches:
+                delete_file(os.path.join(output_folder, m))
+        else:
+            delete_file(output_path)
+        return success_response(None, "Files cleaned up successfully")
+
+    try:
+        db  = current_app.mongo.db
+        doc = db.generated_outputs.find_one(
+            {"_id": ObjectId(output_id), "user_id": request.user_id}
+        )
+    except Exception:
+        return error_response("Database unavailable", 503)
     if not doc:
         return error_response("Output not found", 404)
 
-    # Delete all associated files
     for field in ["body_image", "saree_image", "blouse_image", "output_image"]:
         delete_file(doc.get(field, ""))
-
-    # Soft-delete the record
     db.generated_outputs.update_one(
         {"_id": ObjectId(output_id)},
         {"$set": {"is_deleted": True}},
