@@ -72,6 +72,7 @@ export const fetchDataset     = (dataset_slug, category, max_images = 150, mode 
 export const cleanDataset     = ()  => api.post('/dataset/clean');
 export const annotateDataset  = ()  => api.post('/dataset/annotate');
 export const getDatasetStatus = ()  => api.get('/dataset/status');
+export const getLiveCounts    = ()  => api.get('/dataset/counts');
 
 // ── Training ──────────────────────────────────────────────────────────────────
 export const startTraining    = (config = {}) => api.post('/train/start', config);

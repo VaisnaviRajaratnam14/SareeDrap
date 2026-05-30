@@ -12,7 +12,7 @@ import { useDraping } from '../context/DrapingContext';
 import {
   renderDraping, getEngineStatus, testInference,
   fetchDataset, cleanDataset, annotateDataset, startTraining,
-  getDatasetStatus, getTrainingStatus,
+  getDatasetStatus, getTrainingStatus, getLiveCounts,
 } from '../services/api';
 
 const DRAPING_STYLES = [
@@ -123,6 +123,7 @@ export default function CustomizePage() {
   const [fetchLoading,   setFetchLoading]   = useState(false);
   const [fetchResult,    setFetchResult]    = useState(null);
   const [perCategory,    setPerCategory]    = useState({});
+  const [rawCounts,      setRawCounts]      = useState({});
   const [datasetFetched, setDatasetFetched] = useState(false);
 
   // Clean step
@@ -152,22 +153,22 @@ export default function CustomizePage() {
   // Generate
   const [genLoading,     setGenLoading]     = useState(false);
 
-  // ── Refresh dataset counts from both status endpoints ─────────────────────
+  // ── Refresh live counts from /api/dataset/counts (never cached) ─────────────
   const refreshDatasetCounts = useCallback(() => {
+    getLiveCounts()
+      .then(res => {
+        const d = res.data?.data || res.data;
+        if (d?.raw)     { setRawCounts(d.raw);     setPerCategory(d.raw); }
+        if (d?.cleaned) { setCleanedCounts(d.cleaned); }
+        if (d?.total_raw > 0) setDatasetFetched(true);
+      })
+      .catch(() => {});
+    // Also sync state flags from the cached status (fetched/cleaned/annotated booleans only)
     getDatasetStatus()
       .then(res => {
         const d = res.data?.data || res.data;
-        if (d?.per_category)         setPerCategory(d.per_category);
-        if (d?.cleaned_per_category) setCleanedCounts(d.cleaned_per_category);
-        if (d?.total_images > 0)     setDatasetFetched(true);
-        if (d?.cleaned)              setCleanDone(true);
-        if (d?.annotated)            setAnnotateDone(true);
-      })
-      .catch(() => {});
-    getTrainingStatus()
-      .then(res => {
-        const d = res.data?.data || res.data;
-        if (d?.per_category) setPerCategory(prev => ({ ...prev, ...d.per_category }));
+        if (d?.cleaned)  setCleanDone(true);
+        if (d?.annotated) setAnnotateDone(true);
       })
       .catch(() => {});
   }, []);
@@ -207,8 +208,7 @@ export default function CustomizePage() {
       try {
         const res = await getTrainingStatus();
         const d   = res.data?.data || res.data;
-        if (d?.per_category) setPerCategory(d.per_category);
-        setTrainProgress(d);
+          setTrainProgress(d);
 
         if (d?.status === 'completed') {
           stopTrainPoll();
@@ -258,24 +258,28 @@ export default function CustomizePage() {
   useEffect(() => {
     refreshEngine();
     // Load dataset counts
+    // Load live counts from filesystem (never cached)
+    getLiveCounts()
+      .then(res => {
+        const d = res.data?.data || res.data;
+        if (d?.raw)     { setRawCounts(d.raw);     setPerCategory(d.raw); }
+        if (d?.cleaned) { setCleanedCounts(d.cleaned); }
+        if (d?.total_raw > 0) setDatasetFetched(true);
+      })
+      .catch(() => {});
+    // Load state flags only (not counts)
     getDatasetStatus()
       .then(res => {
         const d = res.data?.data || res.data;
-        if (d?.per_category)         setPerCategory(d.per_category);
-        if (d?.cleaned_per_category) setCleanedCounts(d.cleaned_per_category);
-        if (d?.total_images > 0) {
-          setDatasetFetched(true);
-          setFetchResult({ count: d.total_images, message: `${d.total_images} images found in dataset` });
-        }
         if (d?.cleaned)   setCleanDone(true);
         if (d?.annotated) setAnnotateDone(true);
       })
       .catch(() => {});
-    // Load training status
+    // Load training status — do NOT use per_category from here (cleaned counts)
     getTrainingStatus()
       .then(res => {
         const d = res.data?.data || res.data;
-        if (d?.per_category) setPerCategory(prev => ({ ...prev, ...d.per_category }));
+        if (false && d?.per_category) setPerCategory(prev => ({ ...prev, ...d.per_category })); // intentionally disabled
         if (d?.status === 'completed' && d?.model_exists && !d?.is_stub) {
           console.log('[Engine] Train status: completed with real weights');
           setTrainDone(true);
@@ -297,7 +301,7 @@ export default function CustomizePage() {
       const res = await fetchDataset(datasetSlug || undefined, category, maxImages, fetchMode);
       const d   = res.data?.data || res.data;
       // Immediately apply counts from fetch response
-      if (d?.per_category) setPerCategory(d.per_category);
+      if (d?.per_category) { setRawCounts(d.per_category); setPerCategory(d.per_category); }
       const imported = d?.imported ?? d?.downloaded ?? 0;
       const total    = d?.total_in_dest ?? d?.total_images ?? '?';
       setFetchResult({
@@ -326,7 +330,6 @@ export default function CustomizePage() {
     try {
       const res = await cleanDataset();
       const d   = res.data?.data || res.data;
-      if (d?.per_category)         setPerCategory(d.per_category);
       if (d?.cleaned_per_category) setCleanedCounts(d.cleaned_per_category);
       const count   = d?.cleaned ?? d?.count ?? d?.images_cleaned ?? '?';
       const removed = d?.removed ?? 0;
@@ -575,9 +578,9 @@ export default function CustomizePage() {
                   <h2 className="text-white font-semibold">Model Preparation</h2>
                 </div>
                 <button
-                  onClick={refreshEngine}
+                  onClick={() => { refreshEngine(); refreshDatasetCounts(); }}
                   className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-                  title="Refresh engine status"
+                  title="Refresh engine status and live dataset counts"
                 >
                   <RefreshCw className="w-4 h-4" />
                 </button>
@@ -690,48 +693,117 @@ export default function CustomizePage() {
                       </div>
                     )}
 
-                    {/* Per-category counts — always show once we have data or zero state */}
-                    <div className="space-y-1.5">
-                      {Object.keys(perCategory).length > 0
-                        ? Object.entries(perCategory).map(([cat, cnt]) => {
-                            const pct  = Math.min(100, Math.round((cnt / 150) * 100));
-                            const ok   = cnt >= 50;
-                            const zero = cnt === 0;
-                            return (
-                              <div key={cat}>
-                                <div className="flex justify-between text-xs mb-0.5">
-                                  <span className="text-gray-400 capitalize">{cat.replace(/_/g,' ')}</span>
-                                  <span className={zero ? 'text-gray-600' : ok ? 'text-green-400' : 'text-amber-400'}>
-                                    {zero ? 'no images yet' : `${cnt} ${ok ? '✓' : '/ need 50'}`}
-                                  </span>
-                                </div>
-                                <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
-                                  <div
-                                    className={`h-full rounded-full transition-all ${
-                                      zero ? 'bg-gray-600' : ok ? 'bg-green-500' : 'bg-amber-500'
-                                    }`}
-                                    style={{ width: zero ? '0%' : `${pct}%` }}
-                                  />
-                                </div>
+                    {/* ── Card A: Local Prototype Dataset ── */}
+                    <div className="rounded-xl border border-green-500/20 overflow-hidden">
+                      <div className="bg-green-500/8 px-3 py-2.5 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <MonitorSmartphone className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                          <span className="text-xs font-semibold text-green-300">Local Prototype Dataset</span>
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-green-500/15 text-green-400 ml-1">active</span>
+                        </div>
+                        <span className="text-xs text-green-500/70">Used for local prototype demo</span>
+                      </div>
+                      <div className="bg-gray-900/50 px-3 py-3 space-y-2">
+                        {[
+                          ['Body Images',      'body_images'],
+                          ['Saree Images',     'saree_images'],
+                          ['Blouse Materials', 'blouse_materials'],
+                        ].map(([label, key]) => {
+                          const raw = rawCounts[key] ?? perCategory[key] ?? 0;
+                          const cln = cleanedCounts[key] ?? 0;
+                          const pct = Math.min(100, Math.round((raw / 150) * 100));
+                          const ok  = raw >= 50;
+                          return (
+                            <div key={key}>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span className="text-gray-400">{label}</span>
+                                <span className={raw === 0 ? 'text-gray-600' : ok ? 'text-green-400' : 'text-amber-400'}>
+                                  {raw === 0 ? (
+                                    <span className="text-gray-600">no images yet</span>
+                                  ) : (
+                                    <span className="flex items-center gap-1.5">
+                                      <span className="font-semibold tabular-nums">{raw}</span>
+                                      <span className="text-gray-600">raw</span>
+                                      {cln > 0 && (
+                                        <span className="text-blue-400/80">· {cln} cleaned</span>
+                                      )}
+                                      {ok
+                                        ? <CheckCircle2 className="w-3 h-3 text-green-500" />
+                                        : <span className="text-amber-500">need 50</span>}
+                                    </span>
+                                  )}
+                                </span>
                               </div>
-                            );
-                          })
-                        : ['body images', 'saree images', 'blouse materials'].map(label => (
-                            <div key={label}>
-                              <div className="flex justify-between text-xs mb-0.5">
-                                <span className="text-gray-500 capitalize">{label}</span>
-                                <span className="text-gray-600">no images yet</span>
+                              <div className="h-1 bg-gray-700/60 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-500 ${
+                                    raw === 0 ? 'bg-transparent' : ok ? 'bg-green-500' : 'bg-amber-500'
+                                  }`}
+                                  style={{ width: `${pct}%` }}
+                                />
                               </div>
-                              <div className="h-1 bg-gray-700/50 rounded-full" />
                             </div>
-                          ))
-                      }
+                          );
+                        })}
+                        <div className="pt-1 flex items-center justify-between">
+                          <span className="text-xs text-gray-600">
+                            Total: {Object.values(rawCounts).length > 0
+                              ? Object.values(rawCounts).reduce((a, b) => a + b, 0).toLocaleString()
+                              : '—'} images
+                          </span>
+                          <span className="text-xs text-gray-600">min 50 · 150 recommended</span>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Recommended counts hint */}
-                    <p className="text-xs text-gray-600">
-                      Minimum 50 per category to train · 150 recommended · 500+ for better model
-                    </p>
+                    {/* ── Card B: Colab GPU Training Dataset ── */}
+                    <div className="rounded-xl border border-blue-500/20 overflow-hidden">
+                      <div className="bg-blue-500/8 px-3 py-2.5 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Cloud className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                          <span className="text-xs font-semibold text-blue-300">Colab GPU Training Dataset</span>
+                        </div>
+                        <span className="text-xs text-blue-500/70">Prepared in Google Colab for GPU training</span>
+                      </div>
+                      <div className="bg-gray-900/50 px-3 py-3 space-y-2">
+                        {[
+                          ['Body Images',      50000, 50000],
+                          ['Saree Images',     35000, 50000],
+                          ['Blouse Materials', 50000, 50000],
+                        ].map(([label, count, cap]) => (
+                          <div key={label}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-gray-400">{label}</span>
+                              <span className="text-blue-300 font-semibold tabular-nums">{count.toLocaleString()}</span>
+                            </div>
+                            <div className="h-1 bg-gray-700/60 rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-blue-500/70 transition-all"
+                                style={{ width: `${Math.round((count / cap) * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                        <div className="pt-1 flex items-center justify-between">
+                          <span className="text-xs text-gray-600">Total: 135,000 images</span>
+                          <a
+                            href="https://colab.research.google.com"
+                            target="_blank" rel="noopener noreferrer"
+                            className="text-xs text-blue-500 hover:text-blue-400 flex items-center gap-1 transition-colors"
+                          >
+                            <ExternalLink className="w-3 h-3" /> Open Colab
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Explanatory note */}
+                    <div className="flex items-start gap-2 bg-gray-800/40 rounded-lg px-3 py-2.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400/70 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        Large-scale dataset is prepared in Colab; local app uses sample data for prototype demo.
+                      </p>
+                    </div>
 
                   </div>
                 </StepRow>
@@ -1123,6 +1195,23 @@ export default function CustomizePage() {
                             )}
                           </>
                         )}
+                      </div>
+                    )}
+
+                    {/* Training pending banner — shown when no weights file exists and not currently training */}
+                    {!trainDone && !trainLoading && !trainResult && (
+                      <div className="flex items-start gap-2 bg-amber-500/8 border border-amber-500/20 rounded-xl px-3 py-2.5">
+                        <Cpu className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs text-amber-300 font-medium">
+                            Model training pending GPU / trained weights import
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                            Run <code className="text-gray-400">notebooks/colab_saree_training_10k.ipynb</code> in Colab,
+                            then copy <code className="text-gray-400">saree_tryon_model.pth</code> to{' '}
+                            <code className="text-gray-400">backend/dataset/trained_models/</code> and restart Flask.
+                          </p>
+                        </div>
                       </div>
                     )}
 

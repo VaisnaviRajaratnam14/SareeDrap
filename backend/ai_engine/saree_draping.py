@@ -113,8 +113,26 @@ def _a(anchors, key, default):
     return float(v)
 
 
+def _drop_shadow(canvas: np.ndarray, mask_w: np.ndarray,
+                 offset_x: int = 6, offset_y: int = 8,
+                 blur_r: int = 15, strength: float = 0.45) -> np.ndarray:
+    """Paint a soft drop shadow on canvas under the area defined by mask_w."""
+    shadow = cv2.GaussianBlur(mask_w, (blur_r | 1, blur_r | 1), 0)
+    # Shift shadow down-right
+    M_shift = np.float32([[1, 0, offset_x], [0, 1, offset_y]])
+    ch, cw  = canvas.shape[:2]
+    shadow  = cv2.warpAffine(shadow, M_shift, (cw, ch))
+    shadow  = (shadow * strength)[:, :, np.newaxis]
+    result  = canvas.copy()
+    bg      = result[:, :, :3].astype(np.float32)
+    darkened = np.clip(bg * (1.0 - shadow), 0, 255).astype(np.uint8)
+    result[:, :, :3] = darkened
+    return result
+
+
 def _warp_quad(src_bgr: np.ndarray, dst_pts: np.ndarray,
-               canvas: np.ndarray, alpha: float = 0.85) -> np.ndarray:
+               canvas: np.ndarray, alpha: float = 0.85,
+               shadow: bool = False) -> np.ndarray:
     """Perspective-warp src_bgr into the quadrilateral dst_pts on canvas."""
     sh, sw = src_bgr.shape[:2]
     ch, cw = canvas.shape[:2]
@@ -126,18 +144,21 @@ def _warp_quad(src_bgr: np.ndarray, dst_pts: np.ndarray,
                                   borderMode=cv2.BORDER_TRANSPARENT)
     # Build mask from warped area
     mask_src = np.ones((sh, sw), dtype=np.uint8) * 255
-    mask_w   = cv2.warpPerspective(mask_src, M, (cw, ch))
-    mask_w   = (mask_w > 127).astype(np.float32) * alpha
-    mask_w   = mask_w[:, :, np.newaxis]
+    mask_w   = cv2.warpPerspective(mask_src, M, (cw, ch)).astype(np.float32) / 255.0
 
-    # Feather mask edges for smooth blending
-    ks = 5
-    mask_smooth = cv2.GaussianBlur(mask_w[:, :, 0], (ks, ks), 0)[:, :, np.newaxis]
+    # Feather mask edges (wider feather = softer edge)
+    ks = 11
+    mask_smooth = cv2.GaussianBlur(mask_w, (ks, ks), 0)
+    mask_blend  = (mask_smooth * alpha)[:, :, np.newaxis]
+
+    # Optional drop shadow drawn first (under the fabric)
+    if shadow:
+        canvas = _drop_shadow(canvas, mask_w)
 
     result = canvas.copy()
     bg_bgr = result[:, :, :3].astype(np.float32)
     ov_bgr = warped.astype(np.float32)
-    blended = (ov_bgr * mask_smooth + bg_bgr * (1 - mask_smooth)).astype(np.uint8)
+    blended = (ov_bgr * mask_blend + bg_bgr * (1.0 - mask_blend)).astype(np.uint8)
     result[:, :, :3] = blended
     return result
 
@@ -146,21 +167,20 @@ def _fan_pleats(canvas: np.ndarray, saree_bgr: np.ndarray,
                 wx: float, wy: float,
                 sh_width: float, body_h: float,
                 num_pleats: int = 7,
-                pleat_alpha: float = 0.80) -> np.ndarray:
+                pleat_alpha: float = 0.88) -> np.ndarray:
     """
     Render fan-shaped pleats at the waist center.
-    Each pleat is a narrow trapezoid, slightly overlapping its neighbour.
+    Each pleat is a narrow trapezoid with alternating light/dark for fold depth.
     """
     pleat_w_top = int(sh_width / num_pleats)
-    pleat_w_bot = int(pleat_w_top * 0.85)      # pleats taper downward
-    pleat_h     = int(body_h * 0.55)
+    pleat_w_bot = int(pleat_w_top * 0.78)      # tighter taper for realistic folds
+    pleat_h     = int(body_h * 0.65)            # taller pleats (was 0.55)
     total_w_top = pleat_w_top * num_pleats
     x_start     = int(wx - total_w_top / 2)
 
     sh, sw = saree_bgr.shape[:2]
 
     for i in range(num_pleats):
-        # Source strip
         src_x1 = int((i / num_pleats) * sw)
         src_x2 = int(((i + 1) / num_pleats) * sw)
         strip  = saree_bgr[:, max(0, src_x1):min(sw, src_x2)]
@@ -168,21 +188,25 @@ def _fan_pleats(canvas: np.ndarray, saree_bgr: np.ndarray,
             continue
         strip = cv2.resize(strip, (pleat_w_top, pleat_h))
 
-        # Alternating shadow for fold illusion
-        shade = int(60 * abs(np.sin((i + 0.5) * np.pi / num_pleats)))
+        # Stronger alternating shadow/highlight for visible fold depth
+        shade = int(80 * abs(np.sin((i + 0.5) * np.pi / num_pleats)))
         if i % 2 == 1:
             strip = np.clip(strip.astype(int) - shade, 0, 255).astype(np.uint8)
+        else:
+            strip = np.clip(strip.astype(int) + shade // 3, 0, 255).astype(np.uint8)
 
-        # Trapezoid: top edge full width, bottom edge slightly narrower
-        tx = x_start + i * pleat_w_top
+        # Trapezoid: top wider, bottom narrower — realistic fold shape
+        tx     = x_start + i * pleat_w_top
         offset = (pleat_w_top - pleat_w_bot) // 2
         dst_pts = np.float32([
-            [tx,                  wy],
-            [tx + pleat_w_top,    wy],
+            [tx,                       wy],
+            [tx + pleat_w_top,         wy],
             [tx + pleat_w_top - offset, wy + pleat_h],
-            [tx + offset,         wy + pleat_h],
+            [tx + offset,              wy + pleat_h],
         ])
-        canvas = _warp_quad(strip, dst_pts, canvas, alpha=pleat_alpha)
+        # Add drop shadow on first pleat only to avoid overdark
+        canvas = _warp_quad(strip, dst_pts, canvas, alpha=pleat_alpha,
+                            shadow=(i == 0))
 
     return canvas
 
@@ -191,41 +215,54 @@ def _diagonal_pallu(canvas: np.ndarray, saree_bgr: np.ndarray,
                     wx: float, wy: float,
                     lsx: float, lsy: float,
                     sh_width: float, body_h: float,
-                    alpha: float = 0.82) -> np.ndarray:
+                    alpha: float = 0.90) -> np.ndarray:
     """
-    Draw pallu diagonally from waist-center upward to left shoulder.
-    The pallu is a perspective-warped strip of the saree texture.
+    Draw pallu diagonally from right-hip up and over the left shoulder.
+    Includes: diagonal body, shoulder drape, and hanging tail.
     """
-    pallu_w = int(sh_width * 1.1)
-    pallu_h = int(body_h  * 0.55)
-
-    # Crop a horizontal strip from top of saree for pallu texture
     src_h, src_w = saree_bgr.shape[:2]
-    pallu_src = saree_bgr[:src_h // 2, :]
+
+    # ── Diagonal body of pallu (hip → shoulder) ────────────────────────────────
+    pallu_w = int(sh_width * 1.35)   # wider than before
+    pallu_h = int(body_h  * 0.65)   # taller
+    pallu_src = saree_bgr[:max(src_h // 2, 1), :]
     pallu_src = cv2.resize(pallu_src, (pallu_w, pallu_h))
 
-    # Destination quad: starts near waist-right, ends at left-shoulder
-    # Creates a natural diagonal drape from hip to shoulder
+    # Quad: right side of waist → across chest → left shoulder
+    # Adjusted so top-left corner lands exactly on shoulder point
     dst_pts = np.float32([
-        [wx + sh_width * 0.1,  wy - body_h * 0.05],   # top-right at waist
-        [wx + sh_width * 0.5,  wy + body_h * 0.02],   # bottom-right
-        [lsx + sh_width * 0.3, lsy + body_h * 0.25],  # bottom-left (chest)
-        [lsx - sh_width * 0.1, lsy],                   # top-left (shoulder)
+        [lsx - sh_width * 0.15, lsy - body_h * 0.02],  # top-left  = shoulder
+        [wx  + sh_width * 0.55, wy - body_h * 0.06],   # top-right = waist right
+        [wx  + sh_width * 0.60, wy + body_h * 0.04],   # bot-right
+        [lsx + sh_width * 0.30, lsy + body_h * 0.28],  # bot-left  = chest
     ])
-    canvas = _warp_quad(pallu_src, dst_pts, canvas, alpha=alpha)
+    canvas = _warp_quad(pallu_src, dst_pts, canvas, alpha=alpha, shadow=True)
 
-    # Pallu tail hanging from shoulder downward
-    tail_h  = int(body_h * 0.38)
-    tail_w  = int(sh_width * 0.80)
+    # ── Shoulder drape — fabric pooling over the shoulder cap ─────────────────
+    drape_w = int(sh_width * 0.65)
+    drape_h = int(body_h  * 0.18)
+    drape   = cv2.resize(saree_bgr[: src_h // 3, :], (drape_w, drape_h))
+    # Slight perspective tilt toward body
+    drap_pts = np.float32([
+        [lsx - drape_w * 0.45, lsy - drape_h * 0.20],
+        [lsx + drape_w * 0.35, lsy - drape_h * 0.10],
+        [lsx + drape_w * 0.30, lsy + drape_h * 0.90],
+        [lsx - drape_w * 0.50, lsy + drape_h * 0.80],
+    ])
+    canvas = _warp_quad(drape, drap_pts, canvas, alpha=alpha * 0.92)
+
+    # ── Hanging tail from shoulder downward ───────────────────────────────────
+    tail_h  = int(body_h * 0.55)   # longer tail (was 0.38)
+    tail_w  = int(sh_width * 0.90) # wider tail  (was 0.80)
     tail    = cv2.resize(saree_bgr, (tail_w, tail_h))
+    # Slight rotation for natural hang
     centre  = (tail_w // 2, tail_h // 2)
-    rot_mat = cv2.getRotationMatrix2D(centre, 12, 1.0)
-    # Warp with transparent border to avoid black edges
+    rot_mat = cv2.getRotationMatrix2D(centre, 8, 1.0)
     tail    = cv2.warpAffine(tail, rot_mat, (tail_w, tail_h),
                               borderMode=cv2.BORDER_REPLICATE)
-    tail_x  = int(lsx - tail_w * 0.55)
-    tail_y  = int(lsy)
-    canvas  = _overlay_image(canvas, tail, tail_x, tail_y, alpha=alpha * 0.88)
+    tail_x  = int(lsx - tail_w * 0.52)
+    tail_y  = int(lsy + drape_h * 0.5)
+    canvas  = _overlay_image(canvas, tail, tail_x, tail_y, alpha=alpha * 0.87)
 
     return canvas
 
@@ -237,21 +274,19 @@ def _saree_lower_body(canvas: np.ndarray, saree_bgr: np.ndarray,
                       lankx: float, lanky: float,
                       rankx: float, ranky: float,
                       sh_width: float,
-                      alpha: float = 0.83) -> np.ndarray:
+                      alpha: float = 0.88) -> np.ndarray:
     """
-    Warp the main saree body onto the lower-body trapezoid
-    defined by (left-hip, right-hip) at top and (left-ankle, right-ankle) at bottom.
+    Warp the main saree body onto the lower-body trapezoid.
+    Expanded padding gives a fuller, more natural skirt drape.
     """
-    # Expand slightly beyond hip width for natural drape
-    pad = sh_width * 0.15
+    pad = sh_width * 0.22   # larger pad for wider, fuller coverage (was 0.15)
     dst_pts = np.float32([
-        [lhx - pad,  lhy],      # top-left  (left hip)
-        [rhx + pad,  rhy],      # top-right (right hip)
-        [rankx + pad, ranky],   # bottom-right (right ankle)
-        [lankx - pad, lanky],   # bottom-left  (left ankle)
+        [lhx - pad,   lhy],      # top-left  (left hip)
+        [rhx + pad,   rhy],      # top-right (right hip)
+        [rankx + pad, ranky],    # bottom-right (right ankle)
+        [lankx - pad, lanky],    # bottom-left  (left ankle)
     ])
-    # Use full saree image
-    canvas = _warp_quad(saree_bgr, dst_pts, canvas, alpha=alpha)
+    canvas = _warp_quad(saree_bgr, dst_pts, canvas, alpha=alpha, shadow=True)
     return canvas
 
 
@@ -274,16 +309,16 @@ def _drape_nivi(body_bgra: np.ndarray, saree_bgr: np.ndarray, anchors: dict) -> 
     # 1. Lower body saree (hip → ankle trapezoid) — main skirt portion
     result = _saree_lower_body(result, saree_bgr,
                                 wx, wy, lhx, lhy, rhx, rhy,
-                                lankx, lanky, rankx, ranky, sh_w, alpha=0.80)
+                                lankx, lanky, rankx, ranky, sh_w, alpha=0.88)
 
-    # 2. Fan pleats at front waist — slightly offset right of center (nivi style)
+    # 2. Fan pleats at front waist
     result = _fan_pleats(result, saree_bgr,
-                         wx - sh_w * 0.05, wy, sh_w * 0.72, body_h,
-                         num_pleats=7, pleat_alpha=0.76)
+                         wx - sh_w * 0.05, wy, sh_w * 0.80, body_h,
+                         num_pleats=7, pleat_alpha=0.85)
 
-    # 3. Pallu diagonal: from right hip upward over left shoulder
+    # 3. Pallu: over left shoulder
     result = _diagonal_pallu(result, saree_bgr, wx, wy, lsx, lsy,
-                              sh_w, body_h * 0.85, alpha=0.78)
+                              sh_w, body_h * 0.90, alpha=0.88)
 
     return result
 
@@ -304,9 +339,9 @@ def _drape_bridal(body_bgra: np.ndarray, saree_bgr: np.ndarray, anchors: dict) -
 
     result = _saree_lower_body(result, saree_bgr,
                                 wx, wy, lhx, lhy, rhx, rhy,
-                                lankx, lanky, rankx, ranky, sh_w * 1.1, alpha=0.86)
-    result = _fan_pleats(result, saree_bgr, wx, wy, sh_w * 0.90, body_h, num_pleats=9)
-    result = _diagonal_pallu(result, saree_bgr, wx, wy, lsx, lsy, sh_w * 1.2, body_h, alpha=0.85)
+                                lankx, lanky, rankx, ranky, sh_w * 1.15, alpha=0.90)
+    result = _fan_pleats(result, saree_bgr, wx, wy, sh_w * 0.95, body_h, num_pleats=9)
+    result = _diagonal_pallu(result, saree_bgr, wx, wy, lsx, lsy, sh_w * 1.2, body_h, alpha=0.90)
     return result
 
 
@@ -326,9 +361,9 @@ def _drape_hanging(body_bgra: np.ndarray, saree_bgr: np.ndarray, anchors: dict) 
 
     result = _saree_lower_body(result, saree_bgr,
                                 wx, wy, lhx, lhy, rhx, rhy,
-                                lankx, lanky, rankx, ranky, sh_w, alpha=0.82)
-    result = _fan_pleats(result, saree_bgr, wx, wy, sh_w * 0.70, body_h, num_pleats=5)
-    result = _diagonal_pallu(result, saree_bgr, wx, wy, lsx, lsy, sh_w, body_h * 0.80, alpha=0.80)
+                                lankx, lanky, rankx, ranky, sh_w, alpha=0.86)
+    result = _fan_pleats(result, saree_bgr, wx, wy, sh_w * 0.78, body_h, num_pleats=5)
+    result = _diagonal_pallu(result, saree_bgr, wx, wy, lsx, lsy, sh_w, body_h * 0.88, alpha=0.85)
     return result
 
 
@@ -348,10 +383,10 @@ def _drape_gujarati(body_bgra: np.ndarray, saree_bgr: np.ndarray, anchors: dict)
 
     result = _saree_lower_body(result, saree_bgr,
                                 wx, wy, lhx, lhy, rhx, rhy,
-                                lankx, lanky, rankx, ranky, sh_w, alpha=0.84)
-    result = _fan_pleats(result, saree_bgr, wx, wy, sh_w * 0.75, body_h, num_pleats=7)
+                                lankx, lanky, rankx, ranky, sh_w, alpha=0.88)
+    result = _fan_pleats(result, saree_bgr, wx, wy, sh_w * 0.80, body_h, num_pleats=7)
     # Gujarati: pallu goes over RIGHT shoulder
-    result = _diagonal_pallu(result, saree_bgr, wx, wy, rsx, rsy, sh_w, body_h, alpha=0.83)
+    result = _diagonal_pallu(result, saree_bgr, wx, wy, rsx, rsy, sh_w, body_h, alpha=0.88)
     return result
 
 

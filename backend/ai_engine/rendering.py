@@ -111,8 +111,8 @@ def render_draped_image(
         # Blouse fitting failure is non-fatal; continue without blouse overlay
         print(f"[Rendering] Blouse fitting warning: {e}")
 
-    # ── Step 6: Create final composite on white background ─────────────────────
-    final = _flatten_on_background(draped_bgra, (255, 255, 255))
+    # ── Step 6: Create final composite on warm off-white background ────────────
+    final = _flatten_on_background(draped_bgra, (245, 242, 238))
 
     # ── Step 7: Post-process ───────────────────────────────────────────────────
     final = _post_process(final)
@@ -120,22 +120,23 @@ def render_draped_image(
     # ── Step 8: Save output ────────────────────────────────────────────────────
     os.makedirs(output_folder, exist_ok=True)
     output_path = os.path.join(output_folder, f"output_{uuid.uuid4().hex}.jpg")
-    cv2.imwrite(output_path, final, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    cv2.imwrite(output_path, final, [cv2.IMWRITE_JPEG_QUALITY, 97])
 
     return output_path
 
 
 # ── Image Preprocessing ────────────────────────────────────────────────────────
 
-def _preprocess_image(bgr: np.ndarray, target_size: int = 768) -> np.ndarray:
+def _preprocess_image(bgr: np.ndarray, target_size: int = 1024) -> np.ndarray:
     """
     Resize so the longer side = target_size, normalise lighting.
     """
     h, w  = bgr.shape[:2]
     scale = target_size / max(h, w)
-    if scale < 1.0:
+    if scale != 1.0:
         new_w, new_h = int(w * scale), int(h * scale)
-        bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LANCZOS4
+        bgr = cv2.resize(bgr, (new_w, new_h), interpolation=interp)
 
     # CLAHE for better contrast
     lab  = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
@@ -206,15 +207,24 @@ def _flatten_on_background(
 # ── Post-Processing ────────────────────────────────────────────────────────────
 
 def _post_process(bgr: np.ndarray) -> np.ndarray:
-    """Apply sharpening and subtle colour enhancement."""
+    """Apply sharpening, colour enhancement, and vignette."""
     # Unsharp mask for crispness
-    blurred   = cv2.GaussianBlur(bgr, (0, 0), 3)
-    sharpened = cv2.addWeighted(bgr, 1.5, blurred, -0.5, 0)
+    blurred   = cv2.GaussianBlur(bgr, (0, 0), 2.5)
+    sharpened = cv2.addWeighted(bgr, 1.45, blurred, -0.45, 0)
 
-    # Subtle saturation boost
-    hsv       = cv2.cvtColor(sharpened, cv2.COLOR_BGR2HSV).astype(np.float32)
-    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.1, 0, 255)
+    # Subtle saturation + warmth boost
+    hsv = cv2.cvtColor(sharpened, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.12, 0, 255)
     sharpened = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+    # Soft vignette: darken corners for studio-photo look
+    h, w   = sharpened.shape[:2]
+    cx, cy = w / 2, h / 2
+    Y, X   = np.ogrid[:h, :w]
+    dist   = np.sqrt(((X - cx) / cx) ** 2 + ((Y - cy) / cy) ** 2)
+    vign   = np.clip(1.0 - dist * 0.30, 0.70, 1.0).astype(np.float32)
+    vign   = vign[:, :, np.newaxis]
+    sharpened = np.clip(sharpened.astype(np.float32) * vign, 0, 255).astype(np.uint8)
 
     return sharpened
 

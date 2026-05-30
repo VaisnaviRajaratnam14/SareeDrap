@@ -112,13 +112,13 @@ export default function PreviewPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Output image */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-3">
             <div className="card overflow-hidden">
               {imageUrl ? (
                 <img
                   src={imageUrl}
                   alt="Draped saree result"
-                  className="w-full object-contain max-h-[600px]"
+                  className="w-full object-contain max-h-[760px]"
                   onError={e => { e.target.src = 'https://placehold.co/600x800/1a0a2e/a800e6?text=Preview+Available+After+Processing'; }}
                 />
               ) : (
@@ -128,6 +128,17 @@ export default function PreviewPage() {
                 </div>
               )}
             </div>
+
+            {/* Prominent download button below image */}
+            {imageUrl && (
+              <button
+                onClick={handleDownload}
+                className="w-full flex items-center justify-center gap-2.5 bg-gradient-to-r from-saree-600 to-purple-600 hover:from-saree-500 hover:to-purple-500 text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-saree-500/20 transition-all active:scale-[0.98]"
+              >
+                <Download className="w-5 h-5" />
+                {downloaded ? 'Download Again' : 'Download Result'}
+              </button>
+            )}
           </div>
 
           {/* Action panel */}
@@ -226,13 +237,13 @@ export default function PreviewPage() {
               </div>
             </div>
 
-            {/* Download */}
+            {/* Download (sidebar duplicate — smaller) */}
             <button
               onClick={handleDownload}
-              className="btn-primary w-full flex items-center justify-center gap-2"
+              className="btn-secondary w-full flex items-center justify-center gap-2"
             >
               <Download className="w-4 h-4" />
-              {downloaded ? 'Download Again' : 'Download HD Image'}
+              {downloaded ? 'Downloaded ✓' : 'Save HD Image'}
             </button>
 
             {/* New draping */}

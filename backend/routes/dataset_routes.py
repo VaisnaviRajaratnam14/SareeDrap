@@ -820,6 +820,56 @@ def annotate_dataset():
         )
 
 
+@dataset_bp.route("/counts", methods=["GET"])
+def dataset_counts():
+    """
+    Live filesystem counts — never cached, always reads directly from disk.
+    Returns raw counts, cleaned counts, annotation counts, and folder sizes.
+    Used by the frontend Dataset Status panel.
+    """
+    def _folder_size_mb(folder: Path) -> float:
+        if not folder.exists():
+            return 0.0
+        total = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
+        return round(total / 1024 / 1024, 2)
+
+    raw     = {cat: _count_images(d) for cat, d in _CATEGORY_DIRS.items()}
+    cleaned = {cat: _count_images(d) for cat, d in _CLEANED_DIRS.items()}
+    masks   = _count_images(_MASKS_DIR)
+    annots  = sum(1 for f in _ANNOTATIONS_DIR.rglob("*.json")
+                  if f.is_file()) if _ANNOTATIONS_DIR.exists() else 0
+
+    raw_size_mb     = sum(_folder_size_mb(d) for d in _CATEGORY_DIRS.values())
+    cleaned_size_mb = sum(_folder_size_mb(d) for d in _CLEANED_DIRS.values())
+
+    total_raw     = sum(raw.values())
+    total_cleaned = sum(cleaned.values())
+
+    readiness = {
+        cat: {
+            "raw":          raw[cat],
+            "cleaned":      cleaned[cat],
+            "ready":        cleaned[cat] >= _MIN_TRAIN,
+            "minimum":      _MIN_TRAIN,
+        }
+        for cat in _CATEGORY_DIRS
+    }
+
+    return success_response({
+        "raw":              raw,
+        "cleaned":          cleaned,
+        "total_raw":        total_raw,
+        "total_cleaned":    total_cleaned,
+        "masks":            masks,
+        "annotations":      annots,
+        "raw_size_mb":      round(raw_size_mb, 2),
+        "cleaned_size_mb":  round(cleaned_size_mb, 2),
+        "readiness":        readiness,
+        "can_train":        all(r["ready"] for r in readiness.values()),
+        "min_per_cat":      _MIN_TRAIN,
+    }, "Live dataset counts", 200)
+
+
 @dataset_bp.route("/status", methods=["GET"])
 def dataset_status():
     """Return current dataset state, per-category counts, cleaned counts, and training readiness."""

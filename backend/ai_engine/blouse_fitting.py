@@ -81,14 +81,39 @@ def fit_blouse(
     sh_width   = anchors.get("shoulder_width",  w * 0.3)
     torso_h    = anchors.get("torso_height",    h * 0.3)
 
-    blouse_w = int(sh_width * 1.4)
-    blouse_h = int(torso_h  * 0.65)
+    blouse_w = int(sh_width * 1.60)   # wider: was 1.4
+    blouse_h = int(torso_h  * 0.90)   # taller: was 0.65
 
     # ── Colorise blouse material ───────────────────────────────────────────────
     blouse_colored = _colorise(blouse_bgr, color)
 
-    # ── Resize blouse to fit torso ─────────────────────────────────────────────
-    blouse_resized = cv2.resize(blouse_colored, (blouse_w, blouse_h))
+    # ── Warp blouse texture onto torso quad (shoulders → waist trapezoid) ──────
+    sc_x = float(shoulder_c["x"] if isinstance(shoulder_c, dict) else w / 2)
+    sc_y = float(shoulder_c["y"] if isinstance(shoulder_c, dict) else h * 0.2)
+    wc_x = float(waist_c["x"] if isinstance(waist_c, dict) else w / 2)
+    wc_y = float(waist_c["y"] if isinstance(waist_c, dict) else h * 0.5)
+    half_sh = sh_width / 2
+    tq_src = np.float32([[0, 0], [blouse_w, 0], [blouse_w, blouse_h], [0, blouse_h]])
+    tq_dst = np.float32([
+        [sc_x - half_sh * 0.82, sc_y],
+        [sc_x + half_sh * 0.82, sc_y],
+        [wc_x + half_sh * 0.58, wc_y],
+        [wc_x - half_sh * 0.58, wc_y],
+    ])
+    M_torso = cv2.getPerspectiveTransform(tq_src, tq_dst)
+    blouse_warped = cv2.warpPerspective(
+        cv2.resize(blouse_colored, (blouse_w, blouse_h)),
+        M_torso, (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_TRANSPARENT,
+    )
+    bx = max(0, int(sc_x - blouse_w / 2))
+    by = max(0, int(sc_y))
+    ex = min(w, bx + blouse_w)
+    ey = min(h, by + blouse_h)
+    blouse_resized = blouse_warped[by:ey, bx:ex]
+    if blouse_resized.shape[0] < 4 or blouse_resized.shape[1] < 4:
+        blouse_resized = cv2.resize(blouse_colored, (blouse_w, blouse_h))
 
     # ── Apply neck cutout ──────────────────────────────────────────────────────
     blouse_with_neck = _apply_neck_cutout(blouse_resized, neck_type)
@@ -147,21 +172,22 @@ def _colorise(bgr: np.ndarray, hex_color: str) -> np.ndarray:
 
 def _apply_neck_cutout(blouse_bgr: np.ndarray, neck_type: str) -> np.ndarray:
     """
-    Cut a neck hole in the blouse using a polygon mask.
+    Cut a neck hole in the blouse using a polygon mask with feathered edges.
     Returns BGRA with transparent neck area.
     """
-    h, w  = blouse_bgr.shape[:2]
+    h, w   = blouse_bgr.shape[:2]
     points = NECK_TEMPLATES.get(neck_type, NECK_TEMPLATES["round"])
 
-    # Convert normalised points to pixel coordinates
     poly = np.array(
         [(int(x * w), int(y * h)) for x, y in points],
         dtype=np.int32,
     )
 
-    # Create alpha mask: start fully opaque
+    # Fully opaque base, zero out neck, then feather edge with blur
     alpha = np.full((h, w), 255, dtype=np.uint8)
-    cv2.fillPoly(alpha, [poly], 0)   # transparent neck hole
+    cv2.fillPoly(alpha, [poly], 0)
+    # Feather the cutout edge for natural look
+    alpha = cv2.GaussianBlur(alpha, (7, 7), 0)
 
     bgra = cv2.cvtColor(blouse_bgr, cv2.COLOR_BGR2BGRA)
     bgra[:, :, 3] = alpha
