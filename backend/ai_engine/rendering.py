@@ -89,6 +89,12 @@ def render_draped_image(
     sleeve_type = blouse_config.get("sleeve_type", "short")
     color       = blouse_config.get("color",       "#FFFFFF")
 
+    print(f"[Rendering] body={body_image_path} saree={saree_image_path} blouse={blouse_image_path}")
+    print(f"[Rendering] body_size={w}x{h} style={draping_style} fabric={fabric_type}")
+    print(f"[Rendering] anchors: shoulder_center={raw_anchors.get('shoulder_center')} "
+          f"waist_center={raw_anchors.get('waist_center')} "
+          f"shoulder_width={raw_anchors.get('shoulder_width')}")
+
     try:
         blouse_result = fit_blouse(
             body_image_path=body_image_path,
@@ -100,16 +106,29 @@ def render_draped_image(
         )
         blouse_overlay_path = blouse_result["blouse_overlay_path"]
         blouse_position     = blouse_result["position"]
+        print(f"[Rendering] blouse overlay: {blouse_overlay_path} pos={blouse_position}")
 
         blouse_overlay = cv2.imread(blouse_overlay_path, cv2.IMREAD_UNCHANGED)
         if blouse_overlay is not None:
+            # Resize blouse canvas to match current body size if needed
+            if blouse_overlay.shape[:2] != (h, w):
+                blouse_overlay = cv2.resize(blouse_overlay, (w, h), interpolation=cv2.INTER_LINEAR)
+
+            # Clip blouse alpha to body mask so it never paints outside the silhouette
+            if blouse_overlay.shape[2] == 4:
+                body_mask_f   = body_mask.astype(np.float32) / 255.0
+                blouse_alpha  = blouse_overlay[:, :, 3].astype(np.float32) / 255.0
+                blouse_alpha  = np.minimum(blouse_alpha, body_mask_f)
+                blouse_overlay[:, :, 3] = (blouse_alpha * 255).astype(np.uint8)
+
             draped_bgra = _composite_blouse(
                 draped_bgra, blouse_overlay,
                 blouse_position["x"], blouse_position["y"],
             )
     except Exception as e:
-        # Blouse fitting failure is non-fatal; continue without blouse overlay
+        import traceback
         print(f"[Rendering] Blouse fitting warning: {e}")
+        traceback.print_exc()
 
     # ── Step 6: Create final composite on warm off-white background ────────────
     final = _flatten_on_background(draped_bgra, (245, 242, 238))
@@ -121,6 +140,7 @@ def render_draped_image(
     os.makedirs(output_folder, exist_ok=True)
     output_path = os.path.join(output_folder, f"output_{uuid.uuid4().hex}.jpg")
     cv2.imwrite(output_path, final, [cv2.IMWRITE_JPEG_QUALITY, 97])
+    print(f"[Rendering] ✅ output saved: {output_path} ({final.shape[1]}x{final.shape[0]})")
 
     return output_path
 

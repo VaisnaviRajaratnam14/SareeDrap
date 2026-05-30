@@ -383,9 +383,9 @@ def preprocess_inputs(
         seg_np         (1, H, W)  float32  0..1
     """
     cfg  = _config or _DEFAULT_CONFIG
-    h, w = cfg["img_h"], cfg["img_w"]
-    mean = np.array(cfg["normalize_mean"], dtype=np.float32)
-    std  = np.array(cfg["normalize_std"],  dtype=np.float32)
+    h, w = cfg.get("img_h", 256), cfg.get("img_w", 192)
+    mean = np.array(cfg.get("normalize_mean", [0.485, 0.456, 0.406]), dtype=np.float32)
+    std  = np.array(cfg.get("normalize_std",  [0.229, 0.224, 0.225]), dtype=np.float32)
 
     def _load_rgb(path: str) -> np.ndarray:
         bgr = cv2.imread(path)
@@ -444,7 +444,7 @@ def run_ml_tryon(
     from ai_engine.ml_models import SareeTryOnModel
 
     cfg  = _config or _DEFAULT_CONFIG
-    h, w = cfg["img_h"], cfg["img_w"]
+    h, w = cfg.get("img_h", 256), cfg.get("img_w", 192)
 
     # ── Preprocess ────────────────────────────────────────────────────────────
     inputs = preprocess_inputs(

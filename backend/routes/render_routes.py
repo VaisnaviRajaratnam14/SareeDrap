@@ -89,8 +89,10 @@ def generate():
             engine_used     = "ml_model"
             fallback_reason = ""
         except Exception as ml_err:
+            import traceback as _tb
             fallback_reason = f"ML inference failed: {ml_err}"
             print(f"[Render] {fallback_reason} — using geometric fallback")
+            print(f"[Render] ML traceback: {_tb.format_exc()}")
             output_path = None
     else:
         fallback_reason = (
@@ -113,7 +115,10 @@ def generate():
                 output_folder=output_folder,
             )
             engine_used = "geometric_fallback"
+            print(f"[Render] engine=geometric_fallback output={output_path}")
         except Exception as geo_err:
+            import traceback as _tb2
+            print(f"[Render] Geometric fallback CRASHED:\n{_tb2.format_exc()}")
             return error_response(f"Draping failed: {str(geo_err)}", 500)
 
     # ── Persist to MongoDB (skipped if DB unavailable) ─────────────────────────
